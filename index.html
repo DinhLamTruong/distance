@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bee Distance — Tính khoảng cách đơn hàng</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#172033;background:#f4f6fa;font-synthesis:none}
+*{box-sizing:border-box}body{margin:0}header{background:#ffca05;padding:22px max(18px,calc((100% - 1050px)/2));box-shadow:0 2px 12px #00000012}
+h1{margin:0;font-size:25px}header p{margin:6px 0 0;color:#51420a;font-size:14px}
+main{max-width:1050px;margin:24px auto;padding:0 16px 50px}.panel{background:white;border:1px solid #e5e9f1;border-radius:16px;padding:20px;margin:0 0 16px;box-shadow:0 4px 18px #18233a08}
+h2{font-size:18px;margin:0 0 14px}.muted{color:#667085;font-size:13px;line-height:1.5}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button,.button{border:0;border-radius:10px;padding:11px 15px;background:#f0b900;color:#201900;font-weight:700;cursor:pointer;font-size:14px}
+button.secondary{background:#edf1f7;color:#344054}button.danger{background:#fee4e2;color:#b42318}button:disabled{opacity:.5;cursor:not-allowed}
+input[type=file]{max-width:100%}input[type=text]{width:100%;padding:10px 11px;border:1px solid #d0d5dd;border-radius:9px;font:inherit}
+textarea{width:100%;min-height:100px;border:1px solid #d0d5dd;border-radius:10px;padding:11px;font:inherit;resize:vertical}
+.status{margin-top:12px;padding:11px 13px;background:#f2f4f7;border-radius:10px;font-size:13px;line-height:1.5;white-space:pre-wrap}
+.status.ok{background:#ecfdf3;color:#027a48}.status.err{background:#fef3f2;color:#b42318}
+.preview{max-width:100%;max-height:330px;display:block;margin-top:12px;border-radius:10px}
+.address-list{display:grid;gap:10px;margin-top:14px}.address-item{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid #e4e7ec;border-radius:12px;padding:12px}
+.address-item small{display:block;color:#667085;margin-top:5px}.address-actions{display:flex;gap:6px;flex-wrap:wrap}
+.results{display:grid;gap:10px}.result{border:1px solid #e4e7ec;border-radius:12px;padding:14px;display:grid;grid-template-columns:1fr auto;gap:10px}
+.result h3{font-size:15px;margin:0 0 5px}.metric{font-weight:800;font-size:17px;text-align:right}.submetric{font-size:12px;color:#667085;text-align:right;margin-top:4px}
+.pill{display:inline-block;background:#fff7d6;border-radius:99px;padding:4px 8px;font-size:11px;margin-top:7px}
+footer{max-width:1050px;margin:0 auto;padding:0 16px 28px;color:#667085;font-size:12px}
+hr{border:0;border-top:1px solid #eaecf0;margin:18px 0}
+@media(max-width:600px){.panel{padding:15px}.result{grid-template-columns:1fr}.metric,.submetric{text-align:left}.address-item{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><h1>🐝 Bee Distance</h1><p>Đọc địa chỉ từ ảnh Bee Partner · Tính khoảng cách đường bộ · Sắp xếp đơn gần nhất</p></header>
+<main>
+<section class="panel">
+<h2>1. Chọn ảnh chụp màn hình Bee Partner</h2>
+<div class="row"><input id="imageInput" type="file" accept="image/*"><button id="ocrBtn" disabled>Đọc địa chỉ bằng OCR</button></div>
+<img id="preview" class="preview" hidden alt="Ảnh đã chọn">
+<div class="muted" style="margin-top:9px">OCR chạy trong trình duyệt bằng Tesseract.js, tải dữ liệu tiếng Việt từ Internet ở lần đầu. Ảnh rõ, không nghiêng và có đủ dòng địa chỉ sẽ cho kết quả tốt hơn.</div>
+<div id="ocrStatus" class="status">Chưa chọn ảnh.</div>
+<details id="ocrRawWrap" hidden style="margin-top:10px"><summary class="muted" style="cursor:pointer">Xem chữ OCR đọc được (để đối chiếu với ảnh)</summary><pre id="ocrRaw" class="status" style="white-space:pre-wrap"></pre></details>
+</section>
+
+<section class="panel">
+<h2>2. Địa chỉ xuất phát</h2>
+<input id="originAddress" type="text" value="57 số 35, Bình Trưng, Hồ Chí Minh 70000, Việt Nam" placeholder="Nhập địa chỉ xuất phát" autocomplete="off">
+</section>
+
+<section class="panel">
+<h2>3. Kiểm tra và chỉnh sửa địa chỉ nhận diện</h2>
+<p class="muted">Mỗi dòng là một địa chỉ. Hãy sửa nội dung OCR đọc sai trước khi tính khoảng cách. Có thể thêm địa chỉ thủ công.</p>
+<div class="row"><button id="addBtn" class="secondary">+ Thêm địa chỉ</button><button id="routeBtn" disabled>Tính khoảng cách</button><button id="clearBtn" class="secondary">Xóa danh sách</button></div>
+<div id="addresses" class="address-list"><div class="muted">Chưa có địa chỉ. Hãy chọn ảnh để bắt đầu hoặc thêm thủ công.</div></div>
+<div id="routeStatus" class="status">Nhập địa chỉ xuất phát (hoặc lấy GPS) và có ít nhất một địa chỉ đơn hàng.</div>
+</section>
+
+<section class="panel">
+<h2>4. Kết quả — gần nhất trước</h2>
+<div class="row"><button id="mapsAllBtn" class="secondary" disabled>Mở Google Maps (điểm gần nhất)</button><label class="muted">Sắp xếp: <select id="sortMode" style="padding:9px;border:1px solid #d0d5dd;border-radius:9px"><option value="distance">Gần nhất</option><option value="fare">Giá cao nhất</option><option value="value">Giá/km tốt nhất</option></select></label><button id="historyBtn" class="secondary">Xem lịch sử đã lưu</button><button id="clearHistoryBtn" class="danger">Xóa lịch sử</button></div>
+<div id="results" class="results" style="margin-top:14px"><div class="muted">Chưa có kết quả.</div></div>
+<div id="history" class="results" style="margin-top:14px"></div>
+</section>
+<section class="panel">
+<h2>Lưu ý</h2>
+<ul class="muted" style="padding-left:19px">
+<li>Ảnh và lịch sử được xử lý/lưu trên thiết bị bằng localStorage; không có máy chủ riêng của ứng dụng.</li>
+<li>OCR, tìm tọa độ (Nominatim) và định tuyến (OSRM) cần Internet. Dịch vụ công khai có giới hạn sử dụng; tránh gửi yêu cầu dồn dập.</li>
+<li>Khoảng cách là ước tính tuyến đường bộ do OSRM trả về, không phải cam kết quãng đường xe máy thực tế hay thời gian giao hàng.</li>
+<li>Địa chỉ có thể được định vị sai nếu thiếu phường/xã, quận/huyện hoặc tỉnh/thành. Luôn kiểm tra kết quả trên Google Maps trước khi di chuyển.</li>
+</ul>
+</section>
+</main>
+<footer>Bee Distance · Chạy trực tiếp trong trình duyệt · Không cần Node.js hoặc database</footer>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+let gpsPreferred=false, imageFile = null, gps = null, addresses = [], results = [], orderFares = {};
+const STORAGE_KEY = 'bee-distance-history-v1';
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+function originValue(){return $('originAddress').value.trim();}
+function hasOrigin(){return !!originValue();}
+function cleanAddress(a){
+ return String(a||'').replace(/[=|~_«»¦]+/g,' ').replace(/^(?:[^\p{L}\d]+|\p{L}\p{M}*\s+)+/u,'').replace(/\s+/g,' ').replace(/\s*,(\s*,)+/g,',').replace(/\s+,/g,',').replace(/,(?=\S)/g,', ').replace(/[,\s]+$/,'').trim();
+}
+function status(id, text, type='') { const el=$(id); el.textContent=text; el.className='status '+type; }
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function renderAddresses(){
+ const root=$('addresses');
+ if(!addresses.length){root.innerHTML='<div class="muted">Chưa có địa chỉ.</div>';$('routeBtn').disabled=true;return;}
+ root.innerHTML='';
+ addresses.forEach((a,i)=>{
+  const div=document.createElement('div');div.className='address-item';
+  const fare=orderFares[a];
+  div.innerHTML=`<div><input type="text" aria-label="Địa chỉ ${i+1}" value="${escapeHtml(a)}" data-index="${i}"><small>Đơn #${i+1} · Giá: <input type="number" min="0" step="1000" data-fare="${i}" value="${fare??''}" placeholder="đồng" style="width:110px;padding:5px 7px;border:1px solid #d0d5dd;border-radius:7px"> đ</small></div><div class="address-actions"><button class="secondary" data-up="${i}" title="Lên">↑</button><button class="secondary" data-down="${i}" title="Xuống">↓</button><button class="secondary" data-delete="${i}">Xóa</button></div>`;
+  root.appendChild(div);
+ });
+ root.querySelectorAll('input[data-index]').forEach(inp=>inp.addEventListener('change',e=>{const i=+e.target.dataset.index,old=addresses[i],nv=e.target.value.trim();addresses[i]=nv;if(old!==nv&&orderFares[old]!==undefined){orderFares[nv]=orderFares[old];delete orderFares[old];}}));
+ root.querySelectorAll('input[data-fare]').forEach(inp=>inp.addEventListener('change',e=>{const v=parseFloat(e.target.value);orderFares[addresses[+e.target.dataset.fare]]=isNaN(v)?null:v;}));
+ root.querySelectorAll('[data-delete]').forEach(btn=>btn.addEventListener('click',()=>{addresses.splice(+btn.dataset.delete,1);renderAddresses();}));
+ root.querySelectorAll('[data-up]').forEach(btn=>btn.addEventListener('click',()=>{const i=+btn.dataset.up;if(i>0){[addresses[i-1],addresses[i]]=[addresses[i],addresses[i-1]];renderAddresses();}}));
+ root.querySelectorAll('[data-down]').forEach(btn=>btn.addEventListener('click',()=>{const i=+btn.dataset.down;if(i<addresses.length-1){[addresses[i+1],addresses[i]]=[addresses[i],addresses[i+1]];renderAddresses();}}));
+ $('routeBtn').disabled=!hasOrigin() || !addresses.some(x=>x.trim());
+}
+function normalizeLine(s){return s.replace(/^[\s•·\-–—|]+/,'').replace(/\s+/g,' ').trim();}
+function extractOrders(ocrData){
+ const rawLines=(ocrData.lines||[]).map(x=>({text:normalizeLine(x.text||''),y:x.bbox?.y0??0}))
+  .filter(x=>x.text).sort((a,b)=>a.y-b.y);
+ const timeRe=/\b\d{1,2}:\d{2}\b/;
+ const addressRe=/(\d+\s*[,/ -]?\s*(đường|đ\.|hẻm|ngõ|ngách|ấp|thôn|khu phố|kp\.|tổ|phường|p\.|xã|quận|q\.|huyện|tx\.|thành phố|tp\.|tỉnh)|đường|phường|quận|huyện|thành phố|tỉnh)/i;
+ const headers=[];
+ rawLines.forEach((line,i)=>{if(timeRe.test(line.text))headers.push(i);});
+ const groups=headers.length?headers.map((idx,n)=>rawLines.slice(idx,headers[n+1]??rawLines.length)):[rawLines];
+ const orders=[];
+ for(const group of groups){
+  const joined=group.map(x=>x.text).join(' ');
+  const priceMatch=joined.match(/(\d{1,3}(?:[.,]\d{3})+|\d{4,6})\s*(?:đ|đồng|vnd)/i);
+  const fare=priceMatch?Number(priceMatch[1].replace(/[.,]/g,'')):null;
+  const candidates=group.map(x=>x.text).filter(t=>t.length>=10&&t.length<=180&&addressRe.test(t)&&/\d/.test(t));
+  let address=candidates[0];
+  if(address){
+   const idx=group.findIndex(x=>x.text===address);
+   const next=group[idx+1]?.text||'';
+   if(next && next.length<85 && /(phường|quận|huyện|thành phố|tp\.|tỉnh|việt nam)/i.test(next) && !timeRe.test(next)) address+=', '+next;
+   address=address.replace(/\s+/g,' ').trim();
+   address=cleanAddress(address);if(address&&!orders.some(o=>o.address.toLowerCase()===address.toLowerCase()))orders.push({address,fare});
+  }
+ }
+ if(!orders.length){
+  const lines=(ocrData.text||'').split(/\n+/).map(normalizeLine);
+  for(let i=0;i<lines.length;i++){
+   if(addressRe.test(lines[i])&&/\d/.test(lines[i])&&lines[i].length>=10){
+    const address=cleanAddress(lines[i]+(lines[i+1]&&/(phường|quận|huyện|thành phố|tp\.|tỉnh)/i.test(lines[i+1])?', '+lines[i+1]:''));
+    if(address&&!orders.some(o=>o.address.toLowerCase()===address.toLowerCase()))orders.push({address,fare:null});
+   }
+  }
+ }
+ return orders;
+}
+$('imageInput').addEventListener('change',e=>{
+ imageFile=e.target.files[0]||null;$('ocrBtn').disabled=!imageFile;
+ if(imageFile){const url=URL.createObjectURL(imageFile);$('preview').src=url;$('preview').hidden=false;status('ocrStatus',`Đã chọn: ${imageFile.name} (${Math.round(imageFile.size/1024)} KB). Nhấn “Đọc địa chỉ bằng OCR”.`);}
+});
+async function loadTesseractLibrary(){
+ if(window.Tesseract)return window.Tesseract;
+ const sources=[
+  'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
+  'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js'
+ ];
+ let lastError;
+ for(const src of sources){
+  try{await new Promise((resolve,reject)=>{const script=document.createElement('script');const timer=setTimeout(()=>{script.remove();reject(new Error('Hết thời gian tải thư viện OCR từ '+new URL(src).host));},15000);script.src=src;script.async=true;script.onload=()=>{clearTimeout(timer);resolve();};script.onerror=()=>{clearTimeout(timer);reject(new Error('Không tải được thư viện OCR từ '+new URL(src).host));};document.head.appendChild(script);});if(window.Tesseract)return window.Tesseract;}
+  catch(e){lastError=e;}
+ }
+ throw lastError||new Error('Không tải được thư viện OCR.');
+}
+function prepareOcrImage(file){
+ return new Promise((resolve,reject)=>{
+  const img=new Image(),url=URL.createObjectURL(file);
+  img.onload=()=>{try{
+   const scale=Math.min(4,Math.max(2,Math.ceil(1400/Math.max(img.width,img.height))));
+   const canvas=document.createElement('canvas');canvas.width=img.width*scale;canvas.height=img.height*scale;
+   const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+   ctx.drawImage(img,0,0,canvas.width,canvas.height);
+   const pixels=ctx.getImageData(0,0,canvas.width,canvas.height),d=pixels.data;
+   for(let i=0;i<d.length;i+=4){const gray=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];const v=Math.max(0,Math.min(255,(gray-128)*1.35+128));d[i]=d[i+1]=d[i+2]=v;}
+   ctx.putImageData(pixels,0,0);URL.revokeObjectURL(url);resolve(canvas);
+  }catch(e){URL.revokeObjectURL(url);reject(e);}};
+  img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Không đọc được ảnh đã chọn.'));};img.src=url;
+ });
+}
+$('ocrBtn').addEventListener('click',async()=>{
+ if(!imageFile)return;
+ $('ocrBtn').disabled=true;let worker=null;
+ try{
+  status('ocrStatus','Đang tải thư viện OCR… Nếu mạng chậm, ứng dụng sẽ tự thử nguồn dự phòng.');
+  const OCR=await loadTesseractLibrary();
+  const langPaths=['https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@main','https://tessdata.projectnaptha.com/4.0.0'];
+  let lastError;
+  for(let i=0;i<langPaths.length;i++){
+   try{
+    status('ocrStatus',`Đang khởi tạo OCR tiếng Việt (${i+1}/${langPaths.length})…`);
+    const workerPromise=OCR.createWorker('vie+eng',1,{
+     workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+     corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
+     langPath:langPaths[i],gzip:true,
+     logger:m=>{const label=m.status||'Đang xử lý';const pct=m.progress==null?'':` — ${Math.round(m.progress*100)}%`;status('ocrStatus',`${label}${pct}
+Đang tải/nhận diện ảnh. Giữ trang mở trong lúc xử lý.`);}
+    });
+    worker=await Promise.race([workerPromise,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Tải dữ liệu OCR quá 45 giây. Hệ thống sẽ thử nguồn dự phòng.')),45000))]);
+    break;
+   }catch(e){lastError=e;if(worker){try{await worker.terminate();}catch(_){}worker=null;}}
+  }
+  if(!worker)throw lastError||new Error('Không khởi tạo được OCR.');
+  status('ocrStatus','Đang phóng to và làm rõ ảnh để OCR…');
+  const prepared=await prepareOcrImage(imageFile);
+  status('ocrStatus','Đang đọc chữ trên ảnh…');
+  const {data}=await worker.recognize(prepared);
+  await worker.terminate();worker=null;
+  $('ocrRaw').textContent=data.text||'';$('ocrRawWrap').hidden=false;
+  const found=extractOrders(data);
+  if(found.length){
+   found.forEach(o=>{if(!addresses.some(a=>a.toLowerCase()===o.address.toLowerCase())){addresses.push(o.address);orderFares[o.address]=o.fare;}});
+   renderAddresses();status('ocrStatus',`Đã nhận diện ${found.length} đơn. Đã lấy địa chỉ đầu tiên và giá tiền của từng đơn; bỏ qua địa chỉ giao hàng. Vui lòng kiểm tra lại địa chỉ.`, 'ok');
+  }else{status('ocrStatus','OCR đã chạy nhưng chưa nhận diện được địa chỉ. Hãy dùng ảnh rõ hơn hoặc thêm địa chỉ thủ công.\nVăn bản OCR:\n'+(data.text||'(không có văn bản)').slice(0,1800),'err');}
+ }catch(err){status('ocrStatus','Không chạy được OCR: '+(err.message||err)+'\nKiểm tra Internet hoặc thử lại bằng Wi-Fi/4G khác. Nếu vẫn lỗi, có thể CDN hoặc dữ liệu tiếng Việt đang bị chặn.','err');}
+ finally{if(worker){try{await worker.terminate();}catch(_){}}$('ocrBtn').disabled=!imageFile;}
+});
+$('addBtn').addEventListener('click',()=>{addresses.push('');renderAddresses();const inputs=$('addresses').querySelectorAll('input');if(inputs.length)inputs[inputs.length-1].focus();});
+$('clearBtn').addEventListener('click',()=>{addresses=[];results=[];renderAddresses();renderResults();status('routeStatus','Đã xóa danh sách địa chỉ.');});
+async function fetchJsonWithTimeout(url,options={},timeoutMs=12000){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+ try{const res=await fetch(url,{...options,signal:controller.signal});if(!res.ok)throw new Error('HTTP '+res.status);return await res.json();}
+ catch(e){if(e.name==='AbortError')throw new Error('Máy chủ phản hồi quá lâu (timeout)');throw e;}
+ finally{clearTimeout(timer);}
+}
+const norm=t=>String(t||'').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/gi,'d').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+function parseAddr(addr){
+ const parts=addr.split(',').map(x=>x.trim()).filter(Boolean);
+ const first=parts[0]||'';
+ const m=first.match(/^([\d\/\-]+[A-Za-z]?)\s+(.+)$/);
+ const noNum=(m?m[2]:first).trim();
+ const street=noNum.replace(/^(hẻm|ngõ|ngách|kiệt)\s+/i,'').replace(/^(đường|đ\.)\s*/i,'');
+ const admin=parts.slice(1).map(x=>norm(x).replace(/^(phuong|quan|huyen|thanh pho|xa|tinh|tx|tp|p|q)\s+/,'')).filter(x=>x&&!/^\d+$/.test(x)&&!/ho chi minh|viet nam/.test(x));
+ return {parts,noNum,street,streetKey:norm(street),admin};
+}
+function matchRoad(road,key){const r=norm(road);return !!key&&!!r&&(r===key||r.replace(/^(duong|hem|ngo|ngach|kiet|pho)\s+/,'')===key||r.endsWith(' '+key));}
+async function searchAll(q,near){
+ const out=[],errors=[];let answered=false;
+ try{
+  let u='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&addressdetails=1&countrycodes=vn&q='+encodeURIComponent(q);
+  if(near)u+=`&viewbox=${near.lon-0.4},${near.lat+0.4},${near.lon+0.4},${near.lat-0.4}`;
+  const data=await fetchJsonWithTimeout(u);answered=true;
+  data.forEach(n=>out.push({lat:+n.lat,lon:+n.lon,label:n.display_name,road:n.address?.road||n.address?.pedestrian||n.name||'',text:norm(n.display_name)}));
+ }catch(e){errors.push('Nominatim: '+e.message);}
+ try{
+  const c=near||{lat:10.78,lon:106.70};
+  const u='https://photon.komoot.io/api/?limit=8&lat='+c.lat+'&lon='+c.lon+'&q='+encodeURIComponent(q);
+  const data=await fetchJsonWithTimeout(u);answered=true;
+  (data.features||[]).forEach(f=>{const pr=f.properties||{};const [lon,lat]=f.geometry?.coordinates||[];if(lat==null)return;
+   out.push({lat:+lat,lon:+lon,label:[pr.name,pr.street,pr.district,pr.city,pr.state].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(', '),road:pr.street||pr.name||'',text:norm(Object.values(pr).filter(v=>typeof v==='string').join(' '))});});
+ }catch(e){errors.push('Photon: '+e.message);}
+ if(!answered)throw new Error('Không kết nối được dịch vụ tìm địa chỉ. '+errors.join(' | '));
+ return near?out.filter(c=>Math.abs(c.lat-near.lat)<0.45&&Math.abs(c.lon-near.lon)<0.45):out;
+}
+// Chỉ nhận kết quả có TÊN ĐƯỜNG trùng khớp; ưu tiên kết quả khớp thêm phường/quận. Không đoán bừa.
+async function geocodeSmart(addr,near,allowUnverified){
+ const pa=parseAddr(addr);
+ const rest=pa.parts.slice(1);
+ const list=[addr,[pa.noNum,...rest].join(', ')];
+ if(rest.length>=2)list.push([pa.noNum,...rest.slice(-2)].join(', '));
+ list.push([pa.noNum,rest[rest.length-1]||'Hồ Chí Minh'].join(', '));
+ const seen=new Set(),queries=list.filter(q=>q&&!seen.has(q.toLowerCase())&&seen.add(q.toLowerCase())).map(q=>q+(/việt nam/i.test(q)?'':', Việt Nam'));
+ let best=null,firstRaw=null,answered=false,lastErr=null;
+ for(const q of queries){
+  try{
+   const cands=await searchAll(q,near);answered=true;
+   if(!firstRaw&&cands[0])firstRaw=cands[0];
+   const valid=cands.filter(c=>matchRoad(c.road,pa.streetKey));
+   valid.forEach(c=>c.hits=pa.admin.filter(t=>c.text.includes(t)).length);
+   valid.sort((x,y)=>y.hits-x.hits);
+   const c=valid[0];
+   if(c){if(c.hits>0||!pa.admin.length)return c;if(!best)best=c;}
+  }catch(e){lastErr=e;}
+  await sleep(1100);
+ }
+ if(best)return {...best,uncertain:true};
+ if(allowUnverified&&firstRaw)return {...firstRaw,uncertain:true};
+ if(!answered&&lastErr)throw lastErr;
+ return null;
+}
+async function routeTo(from,to){
+ const url=`https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=false`;
+ const data=await fetchJsonWithTimeout(url,{},15000);
+ if(data.code!=='Ok'||!data.routes?.length)return null;
+ return {km:data.routes[0].distance/1000,minutes:data.routes[0].duration/60};
+}
+const originCache={};
+async function getOrigin(){
+ const t=originValue();
+ if(!originCache[t]){const pt=await geocodeSmart(t,null,true);if(!pt)throw new Error('Không tìm thấy tọa độ địa chỉ xuất phát. Hãy nhập thêm phường/quận/thành phố.');originCache[t]=pt;}
+ return originCache[t];
+}
+async function estimate(r,origin){
+ try{
+  const pt=await geocodeSmart(r.address,origin,false);
+  if(!pt){r.estimateError='Không xác định chắc chắn vị trí (có thể bản đồ chưa có đúng tên đường/phường này). Hãy sửa địa chỉ hoặc mở Google Maps rồi nhập km.';return;}
+  r.point=pt;r.uncertain=!!pt.uncertain;
+  const route=await routeTo(origin,pt);
+  if(route){r.km=route.km;r.minutes=route.minutes;}else r.estimateError='Không có tuyến đường phù hợp';
+ }catch(e){r.estimateError=e.message;}
+}
+$('originAddress').addEventListener('input',()=>renderAddresses());
+$('routeBtn').addEventListener('click',async()=>{
+ {const oldF={...orderFares};addresses=addresses.map(a=>{const c=cleanAddress(a);if(c!==a&&oldF[a]!==undefined)orderFares[c]=oldF[a];return c;});}renderAddresses();
+ const list=addresses.map(x=>x.trim()).filter(Boolean);
+ if(!hasOrigin()||!list.length){status('routeStatus','Cần nhập địa chỉ xuất phát và có ít nhất một địa chỉ đơn hàng.','err');return;}
+ $('routeBtn').disabled=true;
+ results=list.map(address=>({address,fare:orderFares[address]??null,kmManual:null}));
+ renderResults();
+ let origin;
+ try{status('routeStatus','Đang tìm vị trí xuất phát…');origin=await getOrigin();}
+ catch(e){status('routeStatus',e.message,'err');$('routeBtn').disabled=false;return;}
+ for(let i=0;i<results.length;i++){
+  status('routeStatus',`Đang tính ${i+1}/${results.length}: ${results[i].address}`);
+  await estimate(results[i],origin);renderResults();await sleep(900);
+ }
+ sortResults();renderResults();saveHistory();
+ const bad=results.filter(r=>r.km==null).length;
+ status('routeStatus',bad?`Xong, ${bad} đơn chưa tính được — xem lý do ở từng đơn hoặc sửa địa chỉ rồi tính lại.`:'Xong. Km là ước tính theo đường bộ; bấm “Mở Google Maps” để đối chiếu.',bad?'err':'ok');
+ $('routeBtn').disabled=false;
+});
+function fmtTime(min){if(min<60)return `${Math.max(1,Math.round(min))} phút`;const h=Math.floor(min/60),m=Math.round(min%60);return `${h} giờ${m?' '+m+' phút':''}`;}
+function mapsUrl(r){return 'https://www.google.com/maps/dir/?api=1&origin='+encodeURIComponent(originValue())+'&destination='+encodeURIComponent(r.address+', Việt Nam')+'&travelmode=two-wheeler';}
+function effKm(r){return r.kmManual!=null?r.kmManual:(r.km!=null?r.km:null);}
+function sortResults(){
+ const mode=$('sortMode')?.value||'distance';
+ const val=r=>{const k=effKm(r);return(r.fare!=null&&k>0)?r.fare/k:-1;};
+ if(mode==='fare')results.sort((a,b)=>(b.fare??-1)-(a.fare??-1));
+ else if(mode==='value')results.sort((a,b)=>val(b)-val(a));
+ else results.sort((a,b)=>(effKm(a)??Infinity)-(effKm(b)??Infinity));
+}
+$('sortMode').addEventListener('change',()=>{sortResults();renderResults();});
+function renderResults(){
+ const root=$('results');if(!results.length){root.innerHTML='<div class="muted">Chưa có kết quả.</div>';$('mapsAllBtn').disabled=true;return;}
+ root.innerHTML='';
+ results.forEach((r,i)=>{
+  const k=effKm(r);
+  const div=document.createElement('div');div.className='result';
+  const left=document.createElement('div'),right=document.createElement('div');
+  left.innerHTML=`<h3>${i+1}. ${escapeHtml(r.address)}</h3>${r.point?`<div class="muted">Đã định vị: ${escapeHtml(r.point.label)}</div>`:''}${r.fare!=null?`<div style="margin-top:6px;font-weight:700;color:#b54708">Giá đơn: ${Number(r.fare).toLocaleString('vi-VN')}đ</div>`:''}${k>0&&r.fare!=null?`<div class="muted">Giá trị: ${(r.fare/k).toLocaleString('vi-VN',{maximumFractionDigits:0})}đ/km</div>`:''}${r.estimateError?`<div class="muted" style="color:#b42318;margin-top:6px">${escapeHtml(r.estimateError)}</div>`:''}${r.uncertain&&r.km!=null?'<span class="pill">Chưa xác nhận được phường/quận — hãy kiểm tra trên Google Maps</span>':''}`;
+  right.innerHTML=`<div class="metric">${k!=null?k.toFixed(1)+' km':'— km'}</div><div class="submetric">${r.kmManual!=null?'Theo Google Maps':(r.km!=null?fmtTime(r.minutes)+' ước tính':(r.estimateError?'Không tính được':'Chưa có số km'))}</div><div style="text-align:right;margin-top:9px"><button class="secondary">Mở Google Maps</button></div><div style="text-align:right;margin-top:8px"><input type="number" step="0.1" min="0" placeholder="Km (Google)" value="${r.kmManual??''}" style="width:130px;padding:8px;border:1px solid #d0d5dd;border-radius:9px"></div>`;
+  right.querySelector('button').addEventListener('click',()=>window.open(mapsUrl(r),'_blank','noopener'));
+  right.querySelector('input').addEventListener('change',e=>{const v=parseFloat(String(e.target.value).replace(',','.'));r.kmManual=isNaN(v)?null:v;sortResults();renderResults();saveHistory();});
+  div.append(left,right);root.appendChild(div);
+ });
+ $('mapsAllBtn').disabled=!results.length;
+}
+$('mapsAllBtn').addEventListener('click',()=>{const nearest=results[0];if(nearest)window.open(mapsUrl(nearest),'_blank','noopener');});
+function getHistory(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');}catch{return [];}}
+function saveHistory(){
+ const valid=results.filter(r=>effKm(r)!=null);
+ if(!valid.length)return;
+ const history=getHistory();history.unshift({date:new Date().toLocaleString('vi-VN'),origin:originValue(),items:valid.map(r=>({address:r.address,km:effKm(r),minutes:r.minutes??null}))});
+ localStorage.setItem(STORAGE_KEY,JSON.stringify(history.slice(0,30)));
+}
+$('historyBtn').addEventListener('click',()=>{
+ const root=$('history'),h=getHistory();root.innerHTML='<hr><h3 style="font-size:15px">Lịch sử trên thiết bị</h3>';
+ if(!h.length){root.innerHTML+='<div class="muted">Chưa có lịch sử.</div>';return;}
+ h.forEach(entry=>{
+  const box=document.createElement('div');box.className='status';box.style.marginBottom='8px';
+  box.innerHTML=`<b>${escapeHtml(entry.date)}</b><br>${entry.items.map(x=>`${escapeHtml(x.address)} — ${x.km.toFixed(1)} km${x.minutes!=null?', '+fmtTime(x.minutes):''}`).join('<br>')}`;
+  root.appendChild(box);
+ });
+});
+$('clearHistoryBtn').addEventListener('click',()=>{if(confirm('Xóa toàn bộ lịch sử Bee Distance trên thiết bị này?')){localStorage.removeItem(STORAGE_KEY);$('history').innerHTML='';}});
+renderAddresses();
+})();
+</script>
+</body>
+</html>
