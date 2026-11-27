@@ -103,19 +103,104 @@ function renderAddresses(){
  $('routeBtn').disabled=!hasOrigin() || !addresses.some(x=>x.trim());
 }
 function normalizeLine(s){return s.replace(/^[\s•·\-–—|]+/,'').replace(/\s+/g,' ').trim();}
-function extractOrders(ocrData){
- const rawLines=(ocrData.lines||[]).map(x=>({text:normalizeLine(x.text||''),y:x.bbox?.y0??0}))
+// Chuẩn bị ảnh vừa đủ lớn; không phóng quá mức gây chậm và tốn RAM trên điện thoại.
+function prepareOcrImage(file){
+ return new Promise((resolve,reject)=>{
+  const img=new Image(),url=URL.createObjectURL(file);
+  img.onload=()=>{
+   try{
+    const maxSide=2200,scale=Math.min(2.5,Math.max(1, maxSide/Math.max(img.width,img.height)));
+    const canvas=document.createElement('canvas');canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});
+    ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    URL.revokeObjectURL(url);resolve(canvas);
+   }catch(err){URL.revokeObjectURL(url);reject(err);}
+  };
+  img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Không đọc được ảnh đã chọn.'));};img.src=url;
+ });
+}
+function parseFareText(text,requireCurrency=false){
+ const cleaned=String(text||'').replace(/[OoQ]/g,'0').replace(/[Il|]/g,'1').replace(/S/g,'5');
+ const source=requireCurrency?cleaned.replace(/(\d)\s*(?:đ|đồng|vnd)\b/ig,'$1đ'):cleaned;
+ const pattern=requireCurrency?/(?:^|[^\d])((?:\d{1,3}(?:[.,\s]\d{3})+)|\d{4,7})\s*đ(?=$|[^a-z])/ig:/(?:^|[^\d])((?:\d{1,3}(?:[.,\s]\d{3})+)|\d{4,7})(?=$|[^\d])/g;
+ const matches=[...source.matchAll(pattern)];
+ if(!matches.length)return null;
+ const values=matches.map(m=>Number(m[1].replace(/[.,\s]/g,''))).filter(n=>Number.isFinite(n)&&n>=1000&&n<=10000000);
+ // Giá hiển thị ở Bee thường có dấu phân cách hàng nghìn; lấy số dài nhất nếu OCR trả nhiều mảnh.
+ return values.sort((a,b)=>String(b).length-String(a).length)[0]??null;
+}
+async function readFareFromHeader(canvas,header,worker){
+ if(!canvas||!header?.bbox||!worker)return null;
+ const w=canvas.width,h=canvas.height,b=header.bbox;
+ // Vùng giá nằm phía phải cùng hàng với giờ. Mở rộng cả ngang/dọc để không cắt mất chữ số đầu.
+ const rawLineH=Math.max(24,(b.y1??((b.y0??0)+35))-(b.y0??0));
+ const lineH=Math.max(34,rawLineH);
+ const centerY=((b.y0??0)+(b.y1??((b.y0??0)+lineH)))/2;
+ const x=Math.floor(w*0.53);
+ const y=Math.max(0,Math.floor(centerY-lineH*1.65));
+ const bottom=Math.min(h,Math.ceil(centerY+lineH*2.35));
+ const cw=w-x,ch=bottom-y;
+ if(cw<50||ch<35)return null;
+
+ // Tạo nhiều bản crop: bản rộng giữ đủ số đầu, bản tương phản giúp đọc chữ giá màu cam.
+ const makeCrop=(left,top,width,height,mode)=>{
+  const c=document.createElement('canvas');
+  const factor=mode==='wide'?3:4;
+  c.width=Math.max(1,Math.round(width*factor));c.height=Math.max(1,Math.round(height*factor));
+  const cx=c.getContext('2d',{willReadFrequently:true});
+  cx.imageSmoothingEnabled=true;cx.imageSmoothingQuality='high';
+  cx.drawImage(canvas,left,top,width,height,0,0,c.width,c.height);
+  if(mode==='contrast'){
+   const im=cx.getImageData(0,0,c.width,c.height),d=im.data;
+   for(let i=0;i<d.length;i+=4){
+    const gray=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    // Chuyển chữ màu cam/đen thành nét tối, nền thành trắng; giữ nét mảnh.
+    const v=gray<205?0:255;d[i]=d[i+1]=d[i+2]=v;
+   }
+   cx.putImageData(im,0,0);
+  }
+  return c;
+ };
+ const crops=[
+  makeCrop(x,y,cw,ch,'wide'),
+  makeCrop(Math.floor(w*0.60),Math.max(0,Math.floor(centerY-lineH*1.25)),Math.floor(w*0.40),Math.min(h-Math.max(0,Math.floor(centerY-lineH*1.25)),Math.ceil(lineH*3.0)),'contrast')
+ ];
+ const values=[];
+ const oldParams={tessedit_char_whitelist:'',tessedit_pageseg_mode:'6'};
+ try{
+  if(worker.setParameters)await worker.setParameters({tessedit_char_whitelist:'0123456789.,',tessedit_pageseg_mode:'7'});
+  for(const crop of crops){
+   try{
+    const {data}=await worker.recognize(crop);
+    const value=parseFareText(data.text||'');
+    if(value!=null)values.push(value);
+   }catch(_){/* thử crop kế tiếp */}
+  }
+ }finally{
+  try{if(worker.setParameters)await worker.setParameters(oldParams);}catch(_){ }
+ }
+ if(!values.length)return null;
+ // Ưu tiên kết quả có nhiều chữ số hơn (tránh lỗi rơi chữ số đầu: 62.000 -> 2.000),
+ // nếu cùng độ dài thì chọn kết quả được OCR lặp lại nhiều lần; hòa thì chọn số lớn hơn.
+ const counts=new Map();for(const v of values)counts.set(v,(counts.get(v)||0)+1);
+ return [...counts.keys()].sort((a,b)=>String(b).length-String(a).length||(counts.get(b)-counts.get(a))||b-a)[0];
+}
+async function extractOrders(ocrData,preparedCanvas,worker){
+ const rawLines=(ocrData.lines||[]).map(x=>({text:normalizeLine(x.text||''),y:x.bbox?.y0??0,bbox:x.bbox||null}))
   .filter(x=>x.text).sort((a,b)=>a.y-b.y);
  const timeRe=/\b\d{1,2}:\d{2}\b/;
  const addressRe=/(\d+\s*[,/ -]?\s*(đường|đ\.|hẻm|ngõ|ngách|ấp|thôn|khu phố|kp\.|tổ|phường|p\.|xã|quận|q\.|huyện|tx\.|thành phố|tp\.|tỉnh)|đường|phường|quận|huyện|thành phố|tỉnh)/i;
  const headers=[];
  rawLines.forEach((line,i)=>{if(timeRe.test(line.text))headers.push(i);});
- const groups=headers.length?headers.map((idx,n)=>rawLines.slice(idx,headers[n+1]??rawLines.length)):[rawLines];
+ const groups=headers.length?headers.map((idx,n)=>({lines:rawLines.slice(idx,headers[n+1]??rawLines.length),header:rawLines[idx]})):[{lines:rawLines,header:null}];
  const orders=[];
- for(const group of groups){
+ for(const item of groups){
+  const group=item.lines;
   const joined=group.map(x=>x.text).join(' ');
-  const priceMatch=joined.match(/(\d{1,3}(?:[.,]\d{3})+|\d{4,6})\s*(?:đ|đồng|vnd)/i);
-  const fare=priceMatch?Number(priceMatch[1].replace(/[.,]/g,'')):null;
+  const fareFromFull=parseFareText(joined,true);
+  // Đọc lại nhiều crop vùng giá màu cam, ưu tiên kết quả đủ chữ số để tránh rơi số đầu.
+  const fareFromCrop=await readFareFromHeader(preparedCanvas,item.header,worker);
+  const fare=fareFromCrop??fareFromFull;
   const candidates=[];
   for(let i=0;i<group.length;i++){
    const first=group[i].text;
@@ -212,8 +297,8 @@ $('ocrBtn').addEventListener('click',async()=>{
     const prepared=await prepareOcrImage(imageFile);
     status('ocrStatus','Đang đọc chữ trên ảnh…');
     const {data}=await worker.recognize(prepared);
-    $('ocrRaw').textContent=data.text||'';$('ocrRawWrap').hidden=false;
-    const found=extractOrders(data);
+    $('ocrRaw').textContent=(data.text||'')+'\n\n[Kiểm tra giá riêng từng đơn được thực hiện tự động.]';$('ocrRawWrap').hidden=false;
+    const found=await extractOrders(data,prepared,worker);
     if(found.length){
       found.forEach(o=>{
         if(!addresses.some(a=>a.toLowerCase()===o.address.toLowerCase())){
