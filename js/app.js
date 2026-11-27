@@ -10,6 +10,7 @@
   let imageFile = null;
   let addresses = [];
   let orderFares = {};
+  let orderFareRanges = {};
   let orderDropoffs = {};
   let results = [];
 
@@ -51,6 +52,7 @@
       const div = document.createElement('div');
       div.className = 'address-item';
       const fare = orderFares[addr];
+      const fareRange = orderFareRanges[addr];
       const dropoff = orderDropoffs[addr];
 
       div.innerHTML = `
@@ -62,6 +64,7 @@
             Giá cước: 
             <input type="number" min="0" step="1000" data-fare="${i}" value="${fare ?? ''}" placeholder="đồng" style="width:120px;padding:5px 8px;border:1px solid #d0d5dd;border-radius:6px"> đ
           </small>
+          ${fareRange ? `<div class="muted">OCR nhận dạng khoảng ${Number(fareRange.min).toLocaleString('vi-VN')}–${Number(fareRange.max).toLocaleString('vi-VN')} đ</div>` : ''}
         </div>
         <div class="address-actions">
           <button class="secondary" data-up="${i}" title="Chuyển lên">↑</button>
@@ -84,6 +87,10 @@
             orderFares[newAddr] = orderFares[oldAddr];
             delete orderFares[oldAddr];
           }
+          if (orderFareRanges[oldAddr] !== undefined) {
+            orderFareRanges[newAddr] = orderFareRanges[oldAddr];
+            delete orderFareRanges[oldAddr];
+          }
           if (orderDropoffs[oldAddr] !== undefined) {
             orderDropoffs[newAddr] = orderDropoffs[oldAddr];
             delete orderDropoffs[oldAddr];
@@ -97,6 +104,8 @@
         const v = parseFloat(e.target.value);
         const idx = +e.target.dataset.fare;
         orderFares[addresses[idx]] = isNaN(v) ? null : v;
+        delete orderFareRanges[addresses[idx]];
+        renderAddresses();
       });
     });
 
@@ -105,6 +114,7 @@
         const idx = +btn.dataset.delete;
         const addr = addresses[idx];
         delete orderFares[addr];
+        delete orderFareRanges[addr];
         delete orderDropoffs[addr];
         addresses.splice(idx, 1);
         renderAddresses();
@@ -179,6 +189,9 @@
           if (!addresses.some(a => a.toLowerCase() === o.address.toLowerCase())) {
             addresses.push(o.address);
             orderFares[o.address] = o.fare;
+            if (o.fareMin != null && o.fareMax != null) {
+              orderFareRanges[o.address] = { min: o.fareMin, max: o.fareMax };
+            }
             if (o.dropoff) orderDropoffs[o.address] = o.dropoff;
             addedCount++;
           }
@@ -218,6 +231,7 @@
     if (addresses.length && !confirm('Bạn có chắc muốn xóa toàn bộ danh sách địa chỉ?')) return;
     addresses = [];
     orderFares = {};
+    orderFareRanges = {};
     orderDropoffs = {};
     results = [];
     renderAddresses();
@@ -240,6 +254,10 @@
           orderFares[cleaned] = orderFares[a];
           delete orderFares[a];
         }
+        if (orderFareRanges[a] !== undefined) {
+          orderFareRanges[cleaned] = orderFareRanges[a];
+          delete orderFareRanges[a];
+        }
         if (orderDropoffs[a] !== undefined) {
           orderDropoffs[cleaned] = orderDropoffs[a];
           delete orderDropoffs[a];
@@ -260,6 +278,8 @@
       address,
       dropoff: orderDropoffs[address] ?? null,
       fare: orderFares[address] ?? null,
+      fareMin: orderFareRanges[address]?.min ?? null,
+      fareMax: orderFareRanges[address]?.max ?? null,
       kmManual: null,
       km: null,
       minutes: null
@@ -315,6 +335,13 @@
     return r.kmManual != null ? r.kmManual : (r.km != null ? r.km : null);
   }
 
+  function formatFare(r) {
+    if (r.fareMin != null && r.fareMax != null && r.fareMin !== r.fareMax) {
+      return `${Number(r.fareMin).toLocaleString('vi-VN')}–${Number(r.fareMax).toLocaleString('vi-VN')} đ`;
+    }
+    return r.fare != null ? `${Number(r.fare).toLocaleString('vi-VN')} đ` : '';
+  }
+
   function sortResults() {
     const mode = $('sortMode')?.value || 'distance';
     const val = r => {
@@ -357,8 +384,8 @@
         <h3>${i + 1}. 📍 Đón: ${escapeHtml(r.address)}</h3>
         ${r.dropoff ? `<div style="margin:3px 0 6px;color:#475467;font-size:13px">🚩 <b>Đến:</b> ${escapeHtml(r.dropoff)}</div>` : ''}
         ${r.point ? `<div class="muted">📍 Đã định vị: ${escapeHtml(r.point.label)}</div>` : ''}
-        ${r.fare != null ? `<div style="margin-top:5px;font-weight:700;color:#b54708">💵 Giá cước: ${Number(r.fare).toLocaleString('vi-VN')} đ</div>` : ''}
-        ${k > 0 && r.fare != null ? `<div class="muted">⭐ Đơn giá: ${(r.fare / k).toLocaleString('vi-VN', { maximumFractionDigits: 0 })} đ/km</div>` : ''}
+        ${r.fare != null ? `<div style="margin-top:5px;font-weight:700;color:#b54708">💵 Giá cước: ${formatFare(r)}</div>` : ''}
+        ${k > 0 && r.fare != null ? `<div class="muted">⭐ Đơn giá: ${r.fareMin != null && r.fareMax != null ? `${(r.fareMin / k).toLocaleString('vi-VN', { maximumFractionDigits: 0 })}–` : ''}${(r.fare / k).toLocaleString('vi-VN', { maximumFractionDigits: 0 })} đ/km</div>` : ''}
         ${r.estimateError ? `<div class="muted" style="color:#b42318;margin-top:6px">⚠️ ${escapeHtml(r.estimateError)}</div>` : ''}
         ${r.uncertain && r.km != null ? '<span class="pill">Cần đối chiếu thêm trên Google Maps</span>' : ''}
       `;
@@ -422,6 +449,8 @@
         dropoff: r.dropoff ?? null,
         km: effKm(r),
         fare: r.fare ?? null,
+        fareMin: r.fareMin ?? null,
+        fareMax: r.fareMax ?? null,
         minutes: r.minutes ?? null
       }))
     });
@@ -444,7 +473,7 @@
       box.style.marginBottom = '10px';
       box.innerHTML = `
         <b>🕒 ${escapeHtml(entry.date)}</b> · Xuất phát: <i>${escapeHtml(entry.origin)}</i><br>
-        ${entry.items.map(x => `• <b>Đón:</b> ${escapeHtml(x.address)}${x.dropoff ? ` ➔ <b>Đến:</b> ${escapeHtml(x.dropoff)}` : ''} — <b>${x.km.toFixed(1)} km</b>${x.fare ? ` (${Number(x.fare).toLocaleString('vi-VN')} đ)` : ''}${x.minutes != null ? ` (~${fmtTime(x.minutes)})` : ''}`).join('<br>')}
+        ${entry.items.map(x => `• <b>Đón:</b> ${escapeHtml(x.address)}${x.dropoff ? ` ➔ <b>Đến:</b> ${escapeHtml(x.dropoff)}` : ''} — <b>${x.km.toFixed(1)} km</b>${x.fare ? ` (${formatFare(x)})` : ''}${x.minutes != null ? ` (~${fmtTime(x.minutes)})` : ''}`).join('<br>')}
       `;
       root.appendChild(box);
     });

@@ -183,13 +183,36 @@
     return values.sort((a, b) => String(b).length - String(a).length || b - a)[0] ?? null;
   }
 
+  function parseFareRange(text) {
+    if (!text) return null;
+    const cleaned = String(text)
+      .replace(/[OoQ]/g, '0')
+      .replace(/[óòọôơ]/gi, '6')
+      .replace(/[Il|]/g, '1')
+      .replace(/S/g, '5')
+      .replace(/(\d)\s*(?:đ|đồng|vnd|d)\b/ig, '$1đ');
+    const amounts = [...cleaned.matchAll(/(?:^|[^\d])((?:\d{1,3}(?:[.,\s]\d{3})+)|\d{4,7})\s*đ(?=$|[^a-z])/ig)]
+      .map(match => Number(match[1].replace(/[.,\s]/g, '')))
+      .filter(amount => Number.isFinite(amount) && amount >= 1000 && amount <= 10000000);
+
+    if (amounts.length < 2 || !/đ\s*[-–—]\s*[\dOoQóòọôơIl|]/i.test(cleaned)) return null;
+    return {
+      min: Math.min(amounts[0], amounts[1]),
+      max: Math.max(amounts[0], amounts[1])
+    };
+  }
+
   function normalizeLine(s) {
     return String(s || '').replace(/^[\s•·\-–—|¦]+/, '').replace(/\s+/g, ' ').trim();
   }
 
   function cleanOcrAddressFragment(text) {
     return normalizeLine(text)
-      .replace(/^(?:[ọỌ]|[©®]|[&@][\p{L}\d>?]*|[\p{L}]{1,2}(?=\s+\d))\s*/iu, '')
+      .replace(/^(?:[ọỌ]|[©®]|[&@][\p{L}\d>?]*|s\s*=|[\p{L}]{1,2}(?=\s+\d))\s*/iu, '')
+      .replace(/^ó(?=\s*\/\s*\d)/iu, '6')
+      .replace(/^(\d)ó(?=\s)/iu, (_, digit) => `${digit}6`)
+      .replace(/^(?:[©®]\s*)?\d{1,2}\s+(?=chí\s+minh\b)/iu, '')
+      .replace(/\bS\?\s+(?=Ông\s+Lãnh\b)/iu, '')
       .replace(/^[^\p{L}\p{N}]{0,3}(?:[\p{L}\p{N}]{1,3}[\p{P}\p{S}]*)?\s+(?=(?:thành\s+phố|tp\.?|hồ\s+chí\s+minh|ho\s+chi\s+minh)(?:\s|$|[,.;]))/iu, '')
       .trim();
   }
@@ -268,13 +291,17 @@
 
       // 2. Lấy các dòng nội dung địa chỉ (loại bỏ dòng giờ, ngày, giá, beBike)
       const contentLines = groupLines
-        .map(x => cleanOcrAddressFragment(x.text))
+        .map(x => ({
+          text: cleanOcrAddressFragment(x.text),
+          isDropoffMarker: /^ọ(?:\s|$)/i.test(x.text)
+        }))
         .filter(text => {
-          const s = text.trim();
+          const s = text.text.trim();
           if (!s) return false;
           if (/\b\d{1,2}:\d{2}\b/.test(s)) return false;
           if (/\d{1,3}[.,]\d{3}\s*đ/i.test(s)) return false;
           if (/^be(?:bike|car|delivery|food)$/i.test(s)) return false;
+          if (/^giao\s+hàng(?:\s+siêu\s+tốc)?$/i.test(s)) return false;
           if (/^(?:hôm\s*nay|chuyến\s*đang\s*có|chuyến\s*đã\s*nhận)/i.test(s)) return false;
           return true;
         });
@@ -288,12 +315,22 @@
       let current = pickupParts;
 
       for (let i = 0; i < contentLines.length; i++) {
-        const line = contentLines[i].trim();
+        const entry = contentLines[i];
+        const line = entry.text.trim();
+        if (entry.isDropoffMarker && current === pickupParts && pickupParts.length) {
+          current = dropoffParts;
+        }
         current.push(line);
 
         // Điểm đón kết thúc khi gặp Hồ Chí Minh / Thành Phố / Thủ Đức
         const isEndOfPickup = /(hồ\s*chí\s*minh|ho\s*chi\s*minh|thành\s*phố|thanh\s*pho|tp\.?|tỉnh|hcm)$/i.test(line.replace(/[,.-]+$/, ''));
-        if (isEndOfPickup && current === pickupParts && i < contentLines.length - 1) {
+        const nextLine = contentLines[i + 1]?.text.trim() || '';
+        const splitCityName = /hồ$/i.test(line.replace(/[,.-]+$/, '')) && /^chí\s+minh\b/i.test(nextLine);
+        if (splitCityName && current === pickupParts) {
+          pickupParts.push(nextLine);
+          i++;
+        }
+        if ((isEndOfPickup || splitCityName) && current === pickupParts && i < contentLines.length - 1) {
           current = dropoffParts;
         }
       }
@@ -307,10 +344,13 @@
 
       if (cleanedPickup && cleanedPickup.length >= 6) {
         if (!orders.some(o => o.address.toLowerCase() === cleanedPickup.toLowerCase())) {
+          const fareRange = parseFareRange(joined);
           orders.push({
             address: cleanedPickup,
             dropoff: cleanedDropoff || null,
-            fare: fare
+            fare: fareRange?.max ?? fare,
+            fareMin: fareRange?.min ?? null,
+            fareMax: fareRange?.max ?? null
           });
         }
       }
@@ -324,6 +364,7 @@
     getOcrWorker,
     prepareOcrImage,
     extractOrders,
-    parseFareText
+    parseFareText,
+    parseFareRange
   };
 })(window);
