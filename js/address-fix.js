@@ -185,6 +185,7 @@
     str = str.replace(/(?:^|\s+)(?:q\.)\s*([0-9]+)\b/giu, ' Quận $1');
     str = str.replace(/(?:^|\s+)(?:q\.)\s+(?=[a-z\p{L}])/giu, ' Quận ');
     str = str.replace(/(?:^|\s+)(?:kp\.?)\s*([0-9]+)\b/giu, ' Khu Phố $1');
+    str = str.replace(/\bcầu\s+\d{1,2}\s+(?=ông\s+lãnh\b)/giu, ' Cầu ');
 
     // 7. Khử lặp tiền tố
     str = str.replace(/(?:phường|p\.)\s+(?:phường|p\.)\s+/giu, 'Phường ');
