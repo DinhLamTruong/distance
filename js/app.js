@@ -200,7 +200,7 @@
         renderAddresses();
         setStatus(
           'ocrStatus',
-          `✅ Quét xong trong ${scanDuration}s! Tìm thấy chính xác ${foundOrders.length} đơn hàng (${addedCount} đơn mới). Điểm đón khách đã được chuẩn hóa đúng chính tả.`,
+          `✅ Quét xong trong ${scanDuration}s! Trích xuất được ${foundOrders.length} đơn (${addedCount} đơn mới). Vui lòng rà lại địa chỉ và giá cước trước khi tính khoảng cách.`,
           'ok'
         );
       } else {

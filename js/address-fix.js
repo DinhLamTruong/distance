@@ -195,6 +195,7 @@
     str = str.replace(/(?:^|\s+)(?:tp\.?|t\.p\.?)\s*(?:hcm|ho\s*chi\s*minh)(?:\s+|$)/giu, ' TP. Hồ Chí Minh ');
     str = str.replace(/(?:^|\s+)thành\s+phố\s+hồ\s*chí\s*minh(?:\s+|$)/giu, ' TP. Hồ Chí Minh ');
     str = str.replace(/(?:^|\s+)thanh\s+pho\s+ho\s*chi\s*minh(?:\s+|$)/giu, ' TP. Hồ Chí Minh ');
+    str = str.replace(/(?:^|\s+)(?:(?:tp\.?|t\.p\.?)\s*)?hồ\s*chí\s*minh(?:\s*70000)?(?:\s+|$)/giu, ' TP. Hồ Chí Minh ');
     str = str.replace(/(?:^|\s+)ho\s*chi\s*minh(?:\s*70000)?(?:\s+|$)/giu, ' TP. Hồ Chí Minh ');
     str = str.replace(/(?:^|\s+)hcm(?:\s+|$)/giu, ' TP. Hồ Chí Minh ');
     str = str.replace(/(?:^|\s+)viet\s*nam(?:\s+|$)/giu, ' Việt Nam ');

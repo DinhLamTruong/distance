@@ -213,6 +213,7 @@
       .replace(/^(\d)ó(?=\s)/iu, (_, digit) => `${digit}6`)
       .replace(/^(?:[©®]\s*)?\d{1,2}\s+(?=chí\s+minh\b)/iu, '')
       .replace(/\bS\?\s+(?=Ông\s+Lãnh\b)/iu, '')
+      .replace(/\b36[óòọôơ](?:[óòọôơ6])?(?=\s+phan\s+văn\s+trị(?:\s|[,.;]|$))/iu, '366')
       .replace(/^[^\p{L}\p{N}]{0,3}(?:[\p{L}\p{N}]{1,3}[\p{P}\p{S}]*)?\s+(?=(?:thành\s+phố|tp\.?|hồ\s+chí\s+minh|ho\s+chi\s+minh)(?:\s|$|[,.;]))/iu, '')
       .trim();
   }
