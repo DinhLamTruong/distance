@@ -218,6 +218,31 @@
       .trim();
   }
 
+  function normalizeServiceText(text) {
+    return String(text || '')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .replace(/đ/gi, 'd')
+      .toLowerCase()
+      .replace(/[^\p{L}\d]+/gu, ' ')
+      .trim();
+  }
+
+  function getServiceType(text) {
+    const service = normalizeServiceText(text);
+    if (/^giao hang(?: sieu toc)?$/.test(service)) return 'Giao hàng Siêu tốc';
+    if (/^be\s*bike$/.test(service)) return 'beBike';
+    if (/^be\s*car$/.test(service)) return 'beCar';
+    if (/^be\s*delivery$/.test(service)) return 'beDelivery';
+    if (/^be\s*food$/.test(service)) return 'beFood';
+    return null;
+  }
+
+  function isSupportedService(text) {
+    const normalized = normalizeServiceText(text);
+    return /(?:^|\s)(?:be\s*(?:bike|car|delivery|food)|giao\s+hang(?:\s+sieu\s+toc)?)(?=$|\s)/.test(normalized);
+  }
+
   /**
    * Kiểm tra xem một dòng có phải là Header mở đầu một đơn hàng hay không:
    * - Có giờ hẹn: 04:35, 24/11
@@ -237,11 +262,11 @@
     const timeWithDate = /\b\d{1,2}:\d{2}\s*,\s*\d{1,2}\/\d{1,2}\b/;
     if (timeWithDate.test(text)) return true;
 
-    // Khớp dạng giờ độc lập nếu có beBike/beCar hoặc giá tiền ngay bên cạnh/dưới
+    // Chấp nhận mọi loại dịch vụ hỗ trợ, kể cả Giao hàng Siêu tốc.
     const pureTime = /\b\d{1,2}:\d{2}\b/;
     if (pureTime.test(text)) {
       const peek = [text, ...nextLines.map(l => l.text || '')].join(' ');
-      if (/\bbe(?:bike|car|delivery|food)\b/i.test(peek) && parseFareText(peek, true) !== null) {
+      if (isSupportedService(peek) && parseFareText(peek, true) !== null) {
         return true;
       }
     }
@@ -289,14 +314,7 @@
 
       // 1. Lấy giá tiền
       const fare = parseFareText(joined, true);
-      const serviceType = groupLines.map(x => x.text).map(text => {
-        if (/^giao\s+hàng(?:\s+siêu\s+tốc)?$/i.test(text)) return 'Giao hàng Siêu tốc';
-        if (/^be\s*bike$/i.test(text)) return 'beBike';
-        if (/^be\s*car$/i.test(text)) return 'beCar';
-        if (/^be\s*delivery$/i.test(text)) return 'beDelivery';
-        if (/^be\s*food$/i.test(text)) return 'beFood';
-        return null;
-      }).find(Boolean) || null;
+      const serviceType = groupLines.map(x => getServiceType(x.text)).find(Boolean) || null;
 
       // 2. Lấy các dòng nội dung địa chỉ (loại bỏ dòng giờ, ngày, giá, beBike)
       const contentLines = groupLines
@@ -309,8 +327,7 @@
           if (!s) return false;
           if (/\b\d{1,2}:\d{2}\b/.test(s)) return false;
           if (/\d{1,3}[.,]\d{3}\s*đ/i.test(s)) return false;
-          if (/^be(?:bike|car|delivery|food)$/i.test(s)) return false;
-          if (/^giao\s+hàng(?:\s+siêu\s+tốc)?$/i.test(s)) return false;
+          if (getServiceType(s)) return false;
           if (/^(?:hôm\s*nay|chuyến\s*đang\s*có|chuyến\s*đã\s*nhận)/i.test(s)) return false;
           return true;
         });
