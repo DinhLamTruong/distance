@@ -34,7 +34,7 @@ hr{border:0;border-top:1px solid #eaecf0;margin:18px 0}
 <h2>1. Chọn ảnh chụp màn hình Bee Partner</h2>
 <div class="row"><input id="imageInput" type="file" accept="image/*"><button id="ocrBtn" disabled>Đọc địa chỉ bằng OCR</button></div>
 <img id="preview" class="preview" hidden alt="Ảnh đã chọn">
-<div class="muted" style="margin-top:9px">OCR chạy trong trình duyệt bằng Tesseract.js, tải dữ liệu tiếng Việt từ Internet ở lần đầu. Ảnh rõ, không nghiêng và có đủ dòng địa chỉ sẽ cho kết quả tốt hơn.</div>
+<div class="muted" style="margin-top:9px">OCR chạy trong trình duyệt. Ứng dụng giữ bộ OCR để scan ảnh tiếp theo nhanh hơn và lưu dữ liệu ngôn ngữ trong bộ nhớ đệm của trình duyệt. Ảnh rõ, không nghiêng và có đủ dòng địa chỉ sẽ cho kết quả tốt hơn.</div>
 <div id="ocrStatus" class="status">Chưa chọn ảnh.</div>
 <details id="ocrRawWrap" hidden style="margin-top:10px"><summary class="muted" style="cursor:pointer">Xem chữ OCR đọc được (để đối chiếu với ảnh)</summary><pre id="ocrRaw" class="status" style="white-space:pre-wrap"></pre></details>
 </section>
@@ -62,7 +62,7 @@ hr{border:0;border-top:1px solid #eaecf0;margin:18px 0}
 <h2>Lưu ý</h2>
 <ul class="muted" style="padding-left:19px">
 <li>Ảnh và lịch sử được xử lý/lưu trên thiết bị bằng localStorage; không có máy chủ riêng của ứng dụng.</li>
-<li>OCR, tìm tọa độ (Nominatim) và định tuyến (OSRM) cần Internet. Dịch vụ công khai có giới hạn sử dụng; tránh gửi yêu cầu dồn dập.</li>
+<li>Lần đầu dùng OCR cần Internet để tải thư viện và dữ liệu tiếng Việt; trình duyệt sẽ lưu bộ đệm cho lần sau. OCR, tìm tọa độ và định tuyến cần Internet. Dịch vụ công khai có giới hạn sử dụng; tránh gửi yêu cầu dồn dập.</li>
 <li>Khoảng cách là ước tính tuyến đường bộ do OSRM trả về, không phải cam kết quãng đường xe máy thực tế hay thời gian giao hàng.</li>
 <li>Địa chỉ có thể được định vị sai nếu thiếu phường/xã, quận/huyện hoặc tỉnh/thành. Luôn kiểm tra kết quả trên Google Maps trước khi di chuyển.</li>
 </ul>
@@ -75,6 +75,7 @@ hr{border:0;border-top:1px solid #eaecf0;margin:18px 0}
 'use strict';
 const $ = id => document.getElementById(id);
 let gpsPreferred=false, imageFile = null, gps = null, addresses = [], results = [], orderFares = {};
+ let ocrWorkerPromise = null; // Giữ worker sống để các lần scan sau không phải khởi tạo lại.
 const STORAGE_KEY = 'bee-distance-history-v1';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function originValue(){return $('originAddress').value.trim();}
@@ -115,14 +116,27 @@ function extractOrders(ocrData){
   const joined=group.map(x=>x.text).join(' ');
   const priceMatch=joined.match(/(\d{1,3}(?:[.,]\d{3})+|\d{4,6})\s*(?:đ|đồng|vnd)/i);
   const fare=priceMatch?Number(priceMatch[1].replace(/[.,]/g,'')):null;
-  const candidates=group.map(x=>x.text).filter(t=>t.length>=10&&t.length<=180&&addressRe.test(t)&&/\d/.test(t));
-  let address=candidates[0];
+  const candidates=[];
+  for(let i=0;i<group.length;i++){
+   const first=group[i].text;
+   if(first.length<7||first.length>180||!addressRe.test(first)||!/\d/.test(first))continue;
+   let address=first;
+   // Ghép dòng hành chính liền kề khi Bee Partner tách địa chỉ thành nhiều dòng.
+   for(let j=i+1;j<Math.min(group.length,i+3);j++){
+    const next=group[j].text;
+    if(!next||next.length>90||timeRe.test(next)||/(đang giao|đã giao|chi tiết đơn|liên hệ|gọi ngay)/i.test(next))break;
+    if(/(phường|quận|huyện|thành phố|tp\.|tỉnh|xã|việt nam|ward|district)/i.test(next)){
+     address+=', '+next;
+    }else if(address.length<65&&next.length<55&&!/^\d{1,2}:\d{2}$/.test(next)){
+     address+=', '+next;
+    }else break;
+   }
+   candidates.push(address);
+  }
+  let address=candidates.sort((a,b)=>b.length-a.length)[0];
   if(address){
-   const idx=group.findIndex(x=>x.text===address);
-   const next=group[idx+1]?.text||'';
-   if(next && next.length<85 && /(phường|quận|huyện|thành phố|tp\.|tỉnh|việt nam)/i.test(next) && !timeRe.test(next)) address+=', '+next;
-   address=address.replace(/\s+/g,' ').trim();
-   address=cleanAddress(address);if(address&&!orders.some(o=>o.address.toLowerCase()===address.toLowerCase()))orders.push({address,fare});
+   address=cleanAddress(address.replace(/\s+/g,' ').trim());
+   if(address&&!orders.some(o=>o.address.toLowerCase()===address.toLowerCase()))orders.push({address,fare});
   }
  }
  if(!orders.length){
@@ -141,69 +155,82 @@ $('imageInput').addEventListener('change',e=>{
  if(imageFile){const url=URL.createObjectURL(imageFile);$('preview').src=url;$('preview').hidden=false;status('ocrStatus',`Đã chọn: ${imageFile.name} (${Math.round(imageFile.size/1024)} KB). Nhấn “Đọc địa chỉ bằng OCR”.`);}
 });
 async function loadTesseractLibrary(){
- if(window.Tesseract)return window.Tesseract;
- const sources=[
-  'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
-  'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js'
- ];
- let lastError;
- for(const src of sources){
-  try{await new Promise((resolve,reject)=>{const script=document.createElement('script');const timer=setTimeout(()=>{script.remove();reject(new Error('Hết thời gian tải thư viện OCR từ '+new URL(src).host));},15000);script.src=src;script.async=true;script.onload=()=>{clearTimeout(timer);resolve();};script.onerror=()=>{clearTimeout(timer);reject(new Error('Không tải được thư viện OCR từ '+new URL(src).host));};document.head.appendChild(script);});if(window.Tesseract)return window.Tesseract;}
-  catch(e){lastError=e;}
- }
- throw lastError||new Error('Không tải được thư viện OCR.');
+  if(window.Tesseract)return window.Tesseract;
+  const sources=[
+    './libs/tesseract.min.js',
+    'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
+    'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js'
+  ];
+  let lastError;
+  for(const src of sources){
+    try{
+      await new Promise((resolve,reject)=>{
+        const script=document.createElement('script');
+        const timer=setTimeout(()=>{script.remove();reject(new Error('Hết thời gian tải thư viện OCR từ '+src));},12000);
+        script.src=src;script.async=true;
+        script.onload=()=>{clearTimeout(timer);resolve();};
+        script.onerror=()=>{clearTimeout(timer);script.remove();reject(new Error('Không tải được thư viện OCR: '+src));};
+        document.head.appendChild(script);
+      });
+      if(window.Tesseract)return window.Tesseract;
+    }catch(e){lastError=e;}
+  }
+  throw lastError||new Error('Không tải được thư viện OCR.');
 }
-function prepareOcrImage(file){
- return new Promise((resolve,reject)=>{
-  const img=new Image(),url=URL.createObjectURL(file);
-  img.onload=()=>{try{
-   const scale=Math.min(4,Math.max(2,Math.ceil(1400/Math.max(img.width,img.height))));
-   const canvas=document.createElement('canvas');canvas.width=img.width*scale;canvas.height=img.height*scale;
-   const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
-   ctx.drawImage(img,0,0,canvas.width,canvas.height);
-   const pixels=ctx.getImageData(0,0,canvas.width,canvas.height),d=pixels.data;
-   for(let i=0;i<d.length;i+=4){const gray=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];const v=Math.max(0,Math.min(255,(gray-128)*1.35+128));d[i]=d[i+1]=d[i+2]=v;}
-   ctx.putImageData(pixels,0,0);URL.revokeObjectURL(url);resolve(canvas);
-  }catch(e){URL.revokeObjectURL(url);reject(e);}};
-  img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Không đọc được ảnh đã chọn.'));};img.src=url;
- });
+async function getOcrWorker(OCR){
+  if(ocrWorkerPromise)return ocrWorkerPromise;
+  ocrWorkerPromise=(async()=>{
+    const common={
+      workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+      corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
+      langPath:'https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@main',
+      gzip:true,
+      cacheMethod:'write',
+      logger:m=>{
+        const label=m.status||'Đang xử lý';
+        const pct=m.progress==null?'':` — ${Math.round(m.progress*100)}%`;
+        status('ocrStatus',`${label}${pct}\\nĐang chuẩn bị bộ nhận diện. Lần đầu có thể cần tải dữ liệu; các lần sau sẽ dùng bộ nhớ đệm.`);
+      }
+    };
+    try{
+      return await OCR.createWorker('vie+eng',1,common);
+    }catch(first){
+      return await OCR.createWorker('vie+eng',1,{...common,langPath:'https://tessdata.projectnaptha.com/4.0.0'});
+    }
+  })().catch(err=>{ocrWorkerPromise=null;throw err;});
+  return ocrWorkerPromise;
 }
 $('ocrBtn').addEventListener('click',async()=>{
- if(!imageFile)return;
- $('ocrBtn').disabled=true;let worker=null;
- try{
-  status('ocrStatus','Đang tải thư viện OCR… Nếu mạng chậm, ứng dụng sẽ tự thử nguồn dự phòng.');
-  const OCR=await loadTesseractLibrary();
-  const langPaths=['https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@main','https://tessdata.projectnaptha.com/4.0.0'];
-  let lastError;
-  for(let i=0;i<langPaths.length;i++){
-   try{
-    status('ocrStatus',`Đang khởi tạo OCR tiếng Việt (${i+1}/${langPaths.length})…`);
-    const workerPromise=OCR.createWorker('vie+eng',1,{
-     workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-     corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
-     langPath:langPaths[i],gzip:true,
-     logger:m=>{const label=m.status||'Đang xử lý';const pct=m.progress==null?'':` — ${Math.round(m.progress*100)}%`;status('ocrStatus',`${label}${pct}
-Đang tải/nhận diện ảnh. Giữ trang mở trong lúc xử lý.`);}
-    });
-    worker=await Promise.race([workerPromise,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Tải dữ liệu OCR quá 45 giây. Hệ thống sẽ thử nguồn dự phòng.')),45000))]);
-    break;
-   }catch(e){lastError=e;if(worker){try{await worker.terminate();}catch(_){}worker=null;}}
+  if(!imageFile)return;
+  $('ocrBtn').disabled=true;
+  try{
+    status('ocrStatus','Đang kiểm tra thư viện OCR…');
+    const OCR=await loadTesseractLibrary();
+    status('ocrStatus','Đang khởi tạo hoặc kết nối bộ OCR…');
+    const worker=await getOcrWorker(OCR);
+    status('ocrStatus','Đang tối ưu ảnh để nhận diện…');
+    const prepared=await prepareOcrImage(imageFile);
+    status('ocrStatus','Đang đọc chữ trên ảnh…');
+    const {data}=await worker.recognize(prepared);
+    $('ocrRaw').textContent=data.text||'';$('ocrRawWrap').hidden=false;
+    const found=extractOrders(data);
+    if(found.length){
+      found.forEach(o=>{
+        if(!addresses.some(a=>a.toLowerCase()===o.address.toLowerCase())){
+          addresses.push(o.address);orderFares[o.address]=o.fare;
+        }
+      });
+      renderAddresses();
+      status('ocrStatus',`Đã nhận diện ${found.length} địa chỉ. Bộ OCR được giữ lại để scan ảnh tiếp theo nhanh hơn. Vui lòng kiểm tra lại từng địa chỉ.`,'ok');
+    }else{
+      status('ocrStatus','OCR đã chạy nhưng chưa nhận diện được địa chỉ. Hãy thử ảnh rõ hơn hoặc xem phần chữ OCR để kiểm tra.\\nVăn bản OCR:\\n'+(data.text||'(không có văn bản)').slice(0,1800),'err');
+    }
+  }catch(err){
+    ocrWorkerPromise=null;
+    status('ocrStatus','Không chạy được OCR: '+(err.message||err)+'\\nKiểm tra Internet hoặc thử lại bằng Wi-Fi/4G khác.','err');
+  }finally{
+    $('ocrBtn').disabled=!imageFile;
   }
-  if(!worker)throw lastError||new Error('Không khởi tạo được OCR.');
-  status('ocrStatus','Đang phóng to và làm rõ ảnh để OCR…');
-  const prepared=await prepareOcrImage(imageFile);
-  status('ocrStatus','Đang đọc chữ trên ảnh…');
-  const {data}=await worker.recognize(prepared);
-  await worker.terminate();worker=null;
-  $('ocrRaw').textContent=data.text||'';$('ocrRawWrap').hidden=false;
-  const found=extractOrders(data);
-  if(found.length){
-   found.forEach(o=>{if(!addresses.some(a=>a.toLowerCase()===o.address.toLowerCase())){addresses.push(o.address);orderFares[o.address]=o.fare;}});
-   renderAddresses();status('ocrStatus',`Đã nhận diện ${found.length} đơn. Đã lấy địa chỉ đầu tiên và giá tiền của từng đơn; bỏ qua địa chỉ giao hàng. Vui lòng kiểm tra lại địa chỉ.`, 'ok');
-  }else{status('ocrStatus','OCR đã chạy nhưng chưa nhận diện được địa chỉ. Hãy dùng ảnh rõ hơn hoặc thêm địa chỉ thủ công.\nVăn bản OCR:\n'+(data.text||'(không có văn bản)').slice(0,1800),'err');}
- }catch(err){status('ocrStatus','Không chạy được OCR: '+(err.message||err)+'\nKiểm tra Internet hoặc thử lại bằng Wi-Fi/4G khác. Nếu vẫn lỗi, có thể CDN hoặc dữ liệu tiếng Việt đang bị chặn.','err');}
- finally{if(worker){try{await worker.terminate();}catch(_){}}$('ocrBtn').disabled=!imageFile;}
 });
 $('addBtn').addEventListener('click',()=>{addresses.push('');renderAddresses();const inputs=$('addresses').querySelectorAll('input');if(inputs.length)inputs[inputs.length-1].focus();});
 $('clearBtn').addEventListener('click',()=>{addresses=[];results=[];renderAddresses();renderResults();status('routeStatus','Đã xóa danh sách địa chỉ.');});
