@@ -138,6 +138,7 @@
     if (!str) return '';
     return str.split(/(\s+|[,./\-])/).map(token => {
       if (!token || /^\s+$/.test(token) || /^[,./\-]+$/.test(token)) return token;
+      if (/^\d+[a-z]$/i.test(token)) return token;
       if (/^(tp|hcm|kp|vn|q\d+|p\d+|cod)$/i.test(token)) return token.toUpperCase();
       return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
     }).join('');

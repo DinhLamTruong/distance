@@ -289,6 +289,14 @@
 
       // 1. Lấy giá tiền
       const fare = parseFareText(joined, true);
+      const serviceType = groupLines.map(x => x.text).map(text => {
+        if (/^giao\s+hàng(?:\s+siêu\s+tốc)?$/i.test(text)) return 'Giao hàng Siêu tốc';
+        if (/^be\s*bike$/i.test(text)) return 'beBike';
+        if (/^be\s*car$/i.test(text)) return 'beCar';
+        if (/^be\s*delivery$/i.test(text)) return 'beDelivery';
+        if (/^be\s*food$/i.test(text)) return 'beFood';
+        return null;
+      }).find(Boolean) || null;
 
       // 2. Lấy các dòng nội dung địa chỉ (loại bỏ dòng giờ, ngày, giá, beBike)
       const contentLines = groupLines
@@ -349,6 +357,7 @@
           orders.push({
             address: cleanedPickup,
             dropoff: cleanedDropoff || null,
+            serviceType,
             fare: fareRange?.max ?? fare,
             fareMin: fareRange?.min ?? null,
             fareMax: fareRange?.max ?? null

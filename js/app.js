@@ -12,6 +12,7 @@
   let orderFares = {};
   let orderFareRanges = {};
   let orderDropoffs = {};
+  let orderTypes = {};
   let results = [];
 
   function escapeHtml(s) {
@@ -54,11 +55,14 @@
       const fare = orderFares[addr];
       const fareRange = orderFareRanges[addr];
       const dropoff = orderDropoffs[addr];
+      const serviceType = orderTypes[addr];
+      const isDelivery = serviceType === 'Giao hàng Siêu tốc';
+      const pickupLabel = isDelivery ? 'Điểm lấy hàng' : 'Điểm đón khách';
 
       div.innerHTML = `
         <div>
-          <div style="font-size:12px;font-weight:700;color:#0b4a99;margin-bottom:4px">Đơn #${i + 1} — Điểm đón khách:</div>
-          <input type="text" aria-label="Địa chỉ đón ${i + 1}" value="${escapeHtml(addr)}" data-index="${i}">
+          <div style="font-size:12px;font-weight:700;color:#0b4a99;margin-bottom:4px">Đơn #${i + 1}${serviceType ? ` — ${escapeHtml(serviceType)}` : ''} · ${pickupLabel}:</div>
+          <input type="text" aria-label="${pickupLabel} ${i + 1}" value="${escapeHtml(addr)}" data-index="${i}">
           ${dropoff ? `<div class="muted" style="margin-top:4px;font-size:12px;color:#475467">🚩 <b>Điểm đến:</b> ${escapeHtml(dropoff)}</div>` : ''}
           <small>
             Giá cước: 
@@ -95,6 +99,10 @@
             orderDropoffs[newAddr] = orderDropoffs[oldAddr];
             delete orderDropoffs[oldAddr];
           }
+          if (orderTypes[oldAddr] !== undefined) {
+            orderTypes[newAddr] = orderTypes[oldAddr];
+            delete orderTypes[oldAddr];
+          }
         }
       });
     });
@@ -116,6 +124,7 @@
         delete orderFares[addr];
         delete orderFareRanges[addr];
         delete orderDropoffs[addr];
+        delete orderTypes[addr];
         addresses.splice(idx, 1);
         renderAddresses();
       });
@@ -193,6 +202,7 @@
               orderFareRanges[o.address] = { min: o.fareMin, max: o.fareMax };
             }
             if (o.dropoff) orderDropoffs[o.address] = o.dropoff;
+            if (o.serviceType) orderTypes[o.address] = o.serviceType;
             addedCount++;
           }
         });
@@ -233,6 +243,7 @@
     orderFares = {};
     orderFareRanges = {};
     orderDropoffs = {};
+    orderTypes = {};
     results = [];
     renderAddresses();
     renderResults();
@@ -262,6 +273,10 @@
           orderDropoffs[cleaned] = orderDropoffs[a];
           delete orderDropoffs[a];
         }
+        if (orderTypes[a] !== undefined) {
+          orderTypes[cleaned] = orderTypes[a];
+          delete orderTypes[a];
+        }
       }
       return cleaned;
     });
@@ -277,6 +292,7 @@
     results = validList.map(address => ({
       address,
       dropoff: orderDropoffs[address] ?? null,
+      serviceType: orderTypes[address] ?? null,
       fare: orderFares[address] ?? null,
       fareMin: orderFareRanges[address]?.min ?? null,
       fareMax: orderFareRanges[address]?.max ?? null,
@@ -342,6 +358,10 @@
     return r.fare != null ? `${Number(r.fare).toLocaleString('vi-VN')} đ` : '';
   }
 
+  function pickupRole(serviceType) {
+    return serviceType === 'Giao hàng Siêu tốc' ? 'Lấy hàng' : 'Đón khách';
+  }
+
   function sortResults() {
     const mode = $('sortMode')?.value || 'distance';
     const val = r => {
@@ -381,7 +401,7 @@
       const right = document.createElement('div');
 
       left.innerHTML = `
-        <h3>${i + 1}. 📍 Đón: ${escapeHtml(r.address)}</h3>
+        <h3>${i + 1}. ${r.serviceType ? `${escapeHtml(r.serviceType)} · ` : ''}📍 ${pickupRole(r.serviceType)}: ${escapeHtml(r.address)}</h3>
         ${r.dropoff ? `<div style="margin:3px 0 6px;color:#475467;font-size:13px">🚩 <b>Đến:</b> ${escapeHtml(r.dropoff)}</div>` : ''}
         ${r.point ? `<div class="muted">📍 Đã định vị: ${escapeHtml(r.point.label)}</div>` : ''}
         ${r.fare != null ? `<div style="margin-top:5px;font-weight:700;color:#b54708">💵 Giá cước: ${formatFare(r)}</div>` : ''}
@@ -447,6 +467,7 @@
       items: valid.map(r => ({
         address: r.address,
         dropoff: r.dropoff ?? null,
+        serviceType: r.serviceType ?? null,
         km: effKm(r),
         fare: r.fare ?? null,
         fareMin: r.fareMin ?? null,
@@ -473,7 +494,7 @@
       box.style.marginBottom = '10px';
       box.innerHTML = `
         <b>🕒 ${escapeHtml(entry.date)}</b> · Xuất phát: <i>${escapeHtml(entry.origin)}</i><br>
-        ${entry.items.map(x => `• <b>Đón:</b> ${escapeHtml(x.address)}${x.dropoff ? ` ➔ <b>Đến:</b> ${escapeHtml(x.dropoff)}` : ''} — <b>${x.km.toFixed(1)} km</b>${x.fare ? ` (${formatFare(x)})` : ''}${x.minutes != null ? ` (~${fmtTime(x.minutes)})` : ''}`).join('<br>')}
+        ${entry.items.map(x => `• <b>${x.serviceType ? `${escapeHtml(x.serviceType)} · ` : ''}${pickupRole(x.serviceType)}:</b> ${escapeHtml(x.address)}${x.dropoff ? ` ➔ <b>Đến:</b> ${escapeHtml(x.dropoff)}` : ''} — <b>${x.km.toFixed(1)} km</b>${x.fare ? ` (${formatFare(x)})` : ''}${x.minutes != null ? ` (~${fmtTime(x.minutes)})` : ''}`).join('<br>')}
       `;
       root.appendChild(box);
     });
