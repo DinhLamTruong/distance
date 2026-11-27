@@ -194,23 +194,44 @@
 
       if (foundOrders.length) {
         let addedCount = 0;
+        let updatedCount = 0;
         foundOrders.forEach(o => {
-          if (!addresses.some(a => a.toLowerCase() === o.address.toLowerCase())) {
-            addresses.push(o.address);
-            orderFares[o.address] = o.fare;
-            if (o.fareMin != null && o.fareMax != null) {
-              orderFareRanges[o.address] = { min: o.fareMin, max: o.fareMax };
-            }
-            if (o.dropoff) orderDropoffs[o.address] = o.dropoff;
-            if (o.serviceType) orderTypes[o.address] = o.serviceType;
+          const existingAddress = addresses.find(
+            address => address.toLowerCase() === o.address.toLowerCase()
+          );
+          const address = existingAddress || o.address;
+
+          if (existingAddress) {
+            updatedCount++;
+          } else {
+            addresses.push(address);
             addedCount++;
           }
+
+          orderFares[address] = o.fare;
+          if (o.fareMin != null && o.fareMax != null) {
+            orderFareRanges[address] = { min: o.fareMin, max: o.fareMax };
+          } else {
+            delete orderFareRanges[address];
+          }
+          if (o.dropoff) orderDropoffs[address] = o.dropoff;
+          else delete orderDropoffs[address];
+          if (o.serviceType) orderTypes[address] = o.serviceType;
+          else delete orderTypes[address];
         });
 
         renderAddresses();
+        const serviceCounts = foundOrders.reduce((counts, order) => {
+          const type = order.serviceType || 'Chưa rõ loại';
+          counts[type] = (counts[type] || 0) + 1;
+          return counts;
+        }, {});
+        const serviceSummary = Object.entries(serviceCounts)
+          .map(([type, count]) => `${count} ${type}`)
+          .join(', ');
         setStatus(
           'ocrStatus',
-          `✅ Quét xong trong ${scanDuration}s! Trích xuất được ${foundOrders.length} đơn (${addedCount} đơn mới). Vui lòng rà lại địa chỉ và giá cước trước khi tính khoảng cách.`,
+          `✅ Quét xong trong ${scanDuration}s! Nhận diện ${foundOrders.length} đơn (${serviceSummary}); thêm ${addedCount} mới, cập nhật ${updatedCount} đã có. Vui lòng rà lại địa chỉ và giá cước trước khi tính khoảng cách.`,
           'ok'
         );
       } else {
