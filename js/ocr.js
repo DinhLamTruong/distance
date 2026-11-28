@@ -207,8 +207,13 @@
   }
 
   function cleanOcrAddressFragment(text) {
-    return normalizeLine(text)
+    let line = normalizeLine(text);
+    const isTruncated = /(?:\.{2,}|…)\s*$/.test(line);
+    line = line
+      .replace(/(?:\.{2,}|…)\s*$/, '')
       .replace(/^(?:[ọỌ]|[©®]|[&@][\p{L}\d>?]*|s\s*=|[\p{L}]{1,2}(?=\s+\d))\s*/iu, '')
+      .replace(/^[\p{L}\d]{1,2}[©®=~<>^]+\s+(?=(?:p\.?|q\.?|phường|quận|xã|thành|hồ)\b)/iu, '')
+      .replace(/(^|\s)[©®=~<>^]{1,3}(?=\s|$)/gu, '$1')
       .replace(/^(?:[o0]\s*)?[óòọôơ](?=\s*\/\s*\d)/iu, '6')
       .replace(/^(\d)ó(?=\s)/iu, (_, digit) => `${digit}6`)
       .replace(/^(?:[©®]\s*)?\d{1,2}\s+(?=chí\s+minh\b)/iu, '')
@@ -217,6 +222,7 @@
       .replace(/\b36[óòọôơ](?:[óòọôơ6])?(?=\s+phan\s+văn\s+trị(?:\s|[,.;]|$))/iu, '366')
       .replace(/^[^\p{L}\p{N}]{0,3}(?:[\p{L}\p{N}]{1,3}[\p{P}\p{S}]*)?\s+(?=(?:thành\s+phố|tp\.?|hồ\s+chí\s+minh|ho\s+chi\s+minh)(?:\s|$|[,.;]))/iu, '')
       .trim();
+    return isTruncated && line ? `${line}…` : line;
   }
 
   function normalizeServiceText(text) {
