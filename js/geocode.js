@@ -36,19 +36,32 @@
   function parseAddr(addr) {
     const parts = addr.split(',').map(x => x.trim()).filter(Boolean);
     const first = parts[0] || '';
-    const m = first.match(/^([\d\/\-]+[A-Za-z]?)\s+(.+)$/);
-    const noNum = (m ? m[2] : first).trim();
+    const hasHouseNumber = part => /^\d+[A-Za-z]?(?:[\/.-]\d+[A-Za-z]?)*\s+/.test(part);
+    const addressIndex = parts.findIndex((part, index) => index > 0 && hasHouseNumber(part));
+    const streetIndex = addressIndex > 0 ? addressIndex : 0;
+    const streetAddress = parts[streetIndex] || first;
+    const m = streetAddress.match(/^([\d\/\-]+[A-Za-z]?)\s+(.+)$/);
+    const noNum = (m ? m[2] : streetAddress).trim();
     const street = noNum
       .replace(/^(hẻm|ngõ|ngách|kiệt)\s+/i, '')
       .replace(/^(đường|đ\.|d\.)\s*/i, '');
     const admin = parts
-      .slice(1)
+      .slice(streetIndex + 1)
       .map(x =>
         norm(x).replace(/^(phuong|quan|huyen|thanh pho|xa|tinh|tx|tp|p|q)\s+/, '')
       )
       .filter(x => x && !/^\d+$/.test(x) && !/ho chi minh|viet nam/.test(x));
 
-    return { parts, noNum, street, streetKey: norm(street), admin };
+    const place = streetIndex > 0 ? first : '';
+    return {
+      parts,
+      streetIndex,
+      noNum,
+      street,
+      streetKey: norm(street),
+      placeKey: norm(place),
+      admin
+    };
   }
 
   function matchRoad(road, key) {
@@ -127,7 +140,7 @@
     }
 
     const pa = parseAddr(addr);
-    const rest = pa.parts.slice(1);
+    const rest = pa.parts.slice(pa.streetIndex + 1);
     const list = [addr, [pa.noNum, ...rest].join(', ')];
     if (rest.length >= 2) list.push([pa.noNum, ...rest.slice(-2)].join(', '));
     list.push([pa.noNum, rest[rest.length - 1] || 'Hồ Chí Minh'].join(', '));
@@ -148,9 +161,13 @@
         answered = true;
         if (!firstRaw && cands[0]) firstRaw = cands[0];
 
-        const valid = cands.filter(c => matchRoad(c.road, pa.streetKey));
+        const valid = cands.filter(c =>
+          matchRoad(c.road, pa.streetKey) ||
+          (pa.placeKey && c.text.includes(pa.placeKey))
+        );
         valid.forEach(c => {
-          c.hits = pa.admin.filter(t => c.text.includes(t)).length;
+          c.hits = pa.admin.filter(t => c.text.includes(t)).length +
+            (pa.placeKey && c.text.includes(pa.placeKey) ? 2 : 0);
         });
         valid.sort((x, y) => y.hits - x.hits);
 

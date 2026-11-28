@@ -40,6 +40,41 @@
     return !!originValue();
   }
 
+  function normalizeOrderText(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .replace(/đ/gi, 'd')
+      .toLowerCase()
+      .replace(/[^\p{L}\d]+/gu, ' ')
+      .trim();
+  }
+
+  function hasSameOrderIdentity(address, order) {
+    return !!order.serviceType && !!order.dropoff && order.fare != null &&
+      orderTypes[address] === order.serviceType &&
+      Number(orderFares[address]) === Number(order.fare) &&
+      normalizeOrderText(orderDropoffs[address]) === normalizeOrderText(order.dropoff);
+  }
+
+  function deleteOrderMetadata(address) {
+    delete orderFares[address];
+    delete orderFareRanges[address];
+    delete orderDropoffs[address];
+    delete orderTypes[address];
+  }
+
+  function invalidateRouteResults() {
+    if (!results.length) return;
+    results = [];
+    renderResults();
+    setStatus(
+      'routeStatus',
+      'Dữ liệu đơn hàng vừa thay đổi. Hãy tính lại khoảng cách để cập nhật kết quả.',
+      'ok'
+    );
+  }
+
   function renderAddresses() {
     const root = $('addresses');
     if (!addresses.length) {
@@ -103,6 +138,7 @@
             orderTypes[newAddr] = orderTypes[oldAddr];
             delete orderTypes[oldAddr];
           }
+          invalidateRouteResults();
         }
       });
     });
@@ -113,6 +149,7 @@
         const idx = +e.target.dataset.fare;
         orderFares[addresses[idx]] = isNaN(v) ? null : v;
         delete orderFareRanges[addresses[idx]];
+        invalidateRouteResults();
         renderAddresses();
       });
     });
@@ -126,6 +163,7 @@
         delete orderDropoffs[addr];
         delete orderTypes[addr];
         addresses.splice(idx, 1);
+        invalidateRouteResults();
         renderAddresses();
       });
     });
@@ -135,6 +173,7 @@
         const i = +btn.dataset.up;
         if (i > 0) {
           [addresses[i - 1], addresses[i]] = [addresses[i], addresses[i - 1]];
+          invalidateRouteResults();
           renderAddresses();
         }
       });
@@ -196,14 +235,35 @@
         let addedCount = 0;
         let updatedCount = 0;
         foundOrders.forEach(o => {
-          const existingAddress = addresses.find(
-            address => address.toLowerCase() === o.address.toLowerCase()
-          );
-          const address = existingAddress || o.address;
+          const matchingIndices = addresses
+            .map((address, index) => ({ address, index }))
+            .filter(({ address }) =>
+              address.toLowerCase() === o.address.toLowerCase() ||
+              hasSameOrderIdentity(address, o)
+            );
+          const target = matchingIndices.find(
+            ({ address }) => address.toLowerCase() === o.address.toLowerCase()
+          ) || matchingIndices[0];
 
-          if (existingAddress) {
+          let address;
+          if (target) {
+            let targetIndex = target.index;
+            const previousAddress = addresses[targetIndex];
+            address = o.address;
+            addresses[targetIndex] = address;
+            for (const match of matchingIndices.slice().reverse()) {
+              if (match.index === target.index) continue;
+              const duplicateAddress = addresses[match.index];
+              addresses.splice(match.index, 1);
+              if (!addresses.includes(duplicateAddress)) deleteOrderMetadata(duplicateAddress);
+              if (match.index < targetIndex) targetIndex--;
+            }
+            if (previousAddress !== address && !addresses.includes(previousAddress)) {
+              deleteOrderMetadata(previousAddress);
+            }
             updatedCount++;
           } else {
+            address = o.address;
             addresses.push(address);
             addedCount++;
           }
@@ -220,6 +280,7 @@
           else delete orderTypes[address];
         });
 
+        invalidateRouteResults();
         renderAddresses();
         const serviceCounts = foundOrders.reduce((counts, order) => {
           const type = order.serviceType || 'Chưa rõ loại';
@@ -252,6 +313,7 @@
   // Nút thêm địa chỉ thủ công
   $('addBtn')?.addEventListener('click', () => {
     addresses.push('');
+    invalidateRouteResults();
     renderAddresses();
     const inputs = $('addresses').querySelectorAll('input[type="text"]');
     if (inputs.length) inputs[inputs.length - 1].focus();

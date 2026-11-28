@@ -211,6 +211,10 @@
     const isTruncated = /(?:\.{2,}|…)\s*$/.test(line);
     line = line
       .replace(/(?:\.{2,}|…)\s*$/, '')
+      .replace(/^o\s+(?=cổng\s+chính\b)/iu, '')
+      .replace(/^l\s*-\s*(?=điểm\s+đón\s+trả)/iu, '')
+      .replace(/^l\s*-\s*(?=(?:[óòọôơo0]\s*)?\/\s*\d)/iu, '')
+      .replace(/^[=~<>^]{1,2}\s*(?=2\s+(?:phẩm|trường\s+sơn)\b)/iu, '')
       .replace(/^(?:[ọỌ]|[©®]|[&@][\p{L}\d>?]*|s\s*=|[\p{L}]{1,2}(?=\s+\d))\s*/iu, '')
       .replace(/^[\p{L}\d]{1,2}[©®=~<>^]+\s+(?=(?:p\.?|q\.?|phường|quận|xã|thành|hồ)\b)/iu, '')
       .replace(/(^|\s)[©®=~<>^]{1,3}(?=\s|$)/gu, '$1')
@@ -223,6 +227,14 @@
       .replace(/^[^\p{L}\p{N}]{0,3}(?:[\p{L}\p{N}]{1,3}[\p{P}\p{S}]*)?\s+(?=(?:thành\s+phố|tp\.?|hồ\s+chí\s+minh|ho\s+chi\s+minh)(?:\s|$|[,.;]))/iu, '')
       .trim();
     return isTruncated && line ? `${line}…` : line;
+  }
+
+  function fixKnownOcrAddressArtifacts(address) {
+    return address
+      .replace(/\bthực\s+2\s+phẩm\b/giu, 'Thực Phẩm')
+      .replace(/\b(28)\s+2\s+(?=trường\s+sơn\b)/giu, '$1 ')
+      .replace(/cầu\s*[=~<>^?]+\s*(?=ông\s+lãnh)/giu, 'Cầu ')
+      .replace(/(^|[\s,])Hồ\s*[=~<>^?]*\s*\d{1,2}\s+(?=Chí\s+Minh\b)/giu, '$1Hồ ');
   }
 
   function normalizeServiceText(text) {
@@ -368,8 +380,12 @@
         }
       }
 
-      const rawPickup = pickupParts.join(' ').replace(/\s*,\s*/g, ', ').trim();
-      const rawDropoff = dropoffParts.join(' ').replace(/\s*,\s*/g, ', ').trim();
+      const rawPickup = fixKnownOcrAddressArtifacts(
+        pickupParts.join(' ').replace(/\s*,\s*/g, ', ').trim()
+      );
+      const rawDropoff = fixKnownOcrAddressArtifacts(
+        dropoffParts.join(' ').replace(/\s*,\s*/g, ', ').trim()
+      );
 
       // Chuẩn hóa chính tả điểm đón (địa chỉ chính để tài xế di chuyển)
       const cleanedPickup = fixer.cleanAndFixAddress(rawPickup);
